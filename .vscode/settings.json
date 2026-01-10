@@ -1,0 +1,20 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.espIdfPathWin": "c:\\Users\\data\\kafkar.com\\tool_installs\\esp-idf\\v5.5.1\\esp-idf",
+  "idf.pythonInstallPath": "C:\\Users\\niels\\.espressif\\tools\\idf-python\\3.11.2\\python.exe",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.toolsPathWin": "C:\\Users\\niels\\.espressif",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "C:\\Users\\niels\\.espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Users\\data\\kafkar.com\\projects\\displays\\ESP32-S3-Touch-LCD-1.85C\\displayTest\\build"
+  ],
+  "idf.portWin": "COM3",
+  "idf.flashType": "UART"
+}
