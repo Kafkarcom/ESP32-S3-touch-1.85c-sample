@@ -10,6 +10,10 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_st77916.h"
 #include "driver/ledc.h"
+#include "esp_err.h"
+
+#include "esp_lcd_touch.h"          // Defines esp_lcd_touch_point_t
+#include "esp_lcd_touch_cst816s.h"  // Your specific driver
 
 static const char *TAG = "S3_ST77916_LCD";
 
@@ -22,6 +26,7 @@ static const char *TAG = "S3_ST77916_LCD";
 #define TCA9554_ADDRESS         0x20
 #define TCA9554_OUTPUT_REG      0x01
 #define TCA9554_CONFIG_REG      0x03
+#define TOUCH_INT_IO            4
 
 
 #define TCA9554_EXIO1 0x01
@@ -32,6 +37,9 @@ static const char *TAG = "S3_ST77916_LCD";
 #define TCA9554_EXIO6 0x06
 #define TCA9554_EXIO7 0x07
 #define TCA9554_EXIO8 0x08
+
+#define TCA_PIN_TOUCH_RST  (1 << 0) // EXIO1
+#define TCA_PIN_LCD_RST    (1 << 1) // EXIO2
 
 // Constants from the supplier
 #define LEDC_LS_MODE           LEDC_LOW_SPEED_MODE
@@ -320,6 +328,78 @@ void lcd_fill_screen(esp_lcd_panel_handle_t panel_handle, uint16_t color)
     free(buffer);
 }
 
+/**
+ * @brief Draws a simple filled square/circle at coordinates
+ * @param x_center Touch X
+ * @param y_center Touch Y
+ * @param r Radius
+ * @param color RGB565 color
+ */
+void draw_circle(esp_lcd_panel_handle_t panel_handle, uint16_t x_center, uint16_t y_center, uint16_t r, uint16_t color) {
+    int side = r * 2;
+    uint16_t swapped_color = (color << 8) | (color >> 8);
+    
+    // Allocate a buffer for the circle's bounding box
+    uint16_t *buf = heap_caps_malloc(side * side * 2, MALLOC_CAP_DMA);
+    if (!buf) return;
+
+    for (int y = 0; y < side; y++) {
+        for (int x = 0; x < side; x++) {
+            int dx = x - r;
+            int dy = y - r;
+            // Mathematical check: is the pixel inside the circle radius?
+            if ((dx * dx + dy * dy) <= (r * r)) {
+                buf[y * side + x] = swapped_color;
+            } else {
+                // Transparent/Background (optional: read back buffer or just use black)
+                buf[y * side + x] = 0x0000; 
+            }
+        }
+    }
+
+    // Ensure we don't draw off-screen
+    uint16_t draw_x = (x_center > r) ? (x_center - r) : 0;
+    uint16_t draw_y = (y_center > r) ? (y_center - r) : 0;
+
+    esp_lcd_panel_draw_bitmap(panel_handle, draw_x, draw_y, draw_x + side, draw_y + side, buf);
+    free(buf);
+}
+
+
+
+static TaskHandle_t touch_task_handle = NULL;
+
+// This task sleeps until the ISR wakes it up
+void touch_process_task(void *pvParameters) {
+    esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)pvParameters;
+    esp_lcd_touch_point_data_t point;
+    uint8_t points;
+
+    while (1) {
+        // Wait for notification from ISR (indefinite timeout)
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // Read data from the CST816S via I2C
+        if (esp_lcd_touch_read_data(tp) == ESP_OK) {
+            if (esp_lcd_touch_get_data(tp, &point, &points, 1) == ESP_OK) {
+                if (points > 0) {
+                    ESP_LOGI("TOUCH", "X:%d Y:%d", point.x, point.y);
+                    // You can trigger events here, like updating a UI
+                }
+            }
+        }
+        // The CST816S releases the INT line after the I2C read is successful
+    }
+}
+
+static void IRAM_ATTR touch_isr_handler(void *arg) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(touch_task_handle, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken) {
+        portYIELD_FROM_ISR();
+    }
+}
+
 void app_main(void)
 {
     // --- 1. INITIALIZE I2C ---
@@ -329,6 +409,7 @@ void app_main(void)
         .scl_io_num = I2C_SCL_IO,
         .sda_io_num = I2C_SDA_IO,
         .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
     };
     i2c_master_bus_handle_t bus_handle;
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_config, &bus_handle));
@@ -406,8 +487,106 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Heartbeat: ST77916 360x360 is active!");
 
+
+    // --- 2. SELECTIVE TOUCH RESET VIA TCA9554 ---
+    ESP_LOGI(TAG, "Configuring TCA9554 EXIO1 (Touch Reset) as Output...");
+
+    // 1. Set EXIO1 (bit 0) to Output. 
+    // We keep EXIO2 (bit 1) as output too if it was already set.
+    // 0xFC = 1111 1100 (Bits 0 and 1 are outputs)
+    tca9554_write_reg(TCA9554_CONFIG_REG, 0xFC); 
+
+    ESP_LOGI(TAG, "Performing Touch-Only Reset...");
+
+    // 2. Pull EXIO1 LOW (Reset Touch), keep EXIO2 HIGH (LCD Active)
+    // 1111 1110 = 0xFE
+    tca9554_write_reg(TCA9554_OUTPUT_REG, 0xFE); 
+    vTaskDelay(pdMS_TO_TICKS(50)); 
+
+    // 3. Release Reset: Pull EXIO1 HIGH
+    // 1111 1111 = 0xFF
+    tca9554_write_reg(TCA9554_OUTPUT_REG, 0xFF); 
+
+    // 4. CRITICAL: Wait for CST816S firmware to boot before I2C calls
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_lcd_touch_handle_t touch_handle;
+
+   // D. Official CST816S Touch Driver Setup
+    esp_lcd_panel_io_i2c_config_t tp_io_cfg = {
+        .dev_addr = ESP_LCD_TOUCH_IO_I2C_CST816S_ADDRESS,
+        .scl_speed_hz = 100000,                      // Try 100kHz for better stability
+        .control_phase_bytes = 1,
+        .lcd_cmd_bits = 8,
+        .flags.disable_control_phase = 1,
+    };
+    
+    esp_lcd_panel_io_handle_t tp_io_handle;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(bus_handle, &tp_io_cfg, &tp_io_handle));
+
+    esp_lcd_touch_config_t tp_cfg = {
+        .x_max = LCD_H_RES, .y_max = LCD_V_RES, .rst_gpio_num = -1, .int_gpio_num = TOUCH_INT_IO,
+    };
+    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &touch_handle));
+    
+    // Variables for the demo
+    uint16_t colors[] = {0xF800, 0x07E0, 0x001F, 0xFFFF}; // Red, Green, Blue, White
+    int color_idx = 0;
+    
+    // Official touch data structure
+    esp_lcd_touch_point_data_t tp_point; 
+    uint8_t touch_points;
+
+
+    // --- After LCD/Touch Initialization is complete ---
+
+    // 1. Create the dedicated Touch Task (High Priority)
+    xTaskCreate(touch_process_task, "touch_task", 4096, touch_handle, 10, &touch_task_handle);
+
+    // 2. Configure the Interrupt Pin (GPIO 4)
+    gpio_config_t io_conf = {
+        .intr_type = GPIO_INTR_NEGEDGE, // CST816S pulls LOW on touch
+        .pin_bit_mask = (1ULL << TOUCH_INT_IO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE, // Essential for I2C stability
+    };
+    gpio_config(&io_conf);
+
+    // 3. Install ISR service and attach handler
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(TOUCH_INT_IO, touch_isr_handler, NULL);
+
+
+
+    ESP_LOGI(TAG, "System Ready. Touch screen to cycle colors!");
+
     while (1) {
         ESP_LOGI(TAG, "ST77916 is still alive");
+
+// 1. Read data from hardware into internal buffer
+        // if (gpio_get_level(TOUCH_INT_IO) == 0) {
+        //     if (esp_lcd_touch_read_data(touch_handle) == ESP_OK) {
+        //         ESP_LOGI(TAG, "esp_lcd_touch_read_data = ok");
+        //         // 2. Extract the first point into our structure
+        //         // Note: We use &tp_point (esp_lcd_touch_point_t)
+        //         if (esp_lcd_touch_get_data(touch_handle, &tp_point, &touch_points, 1) == ESP_OK) {
+                    
+        //             if (touch_points > 0) {
+        //                 // 3. Access coordinates via .x and .y (Now valid)
+        //                 ESP_LOGI(TAG, "Touch Detected at [%d, %d]", tp_point.x, tp_point.y);
+                        
+        //                 // 4. Use the 'colors' variables (Fixes "unused variable" warnings)
+        //                 // lcd_fill(colors[color_idx]);
+        //                 // color_idx = (color_idx + 1) % 4;
+                        
+        //                 //vTaskDelay(pdMS_TO_TICKS(400)); // Debounce
+        //             }
+        //         }
+        //     }
+        //     else
+        //     {
+        //         ESP_LOGI(TAG, "esp_lcd_touch_read_data = not ok");
+        //     }
+        // }
         ESP_LOGI(TAG, "Filling Red");
         set_backlight_brightness(0);
         lcd_fill_screen(panel_handle, 0xF800);
