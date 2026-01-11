@@ -1,4 +1,5 @@
 #include "i2c_utils.h"
+#include "extendio.h"
 #include "esp_log.h"
 #include "esp_check.h"
 
@@ -33,15 +34,4 @@ esp_err_t i2c_init(i2c_master_bus_handle_t *bus_handle, i2c_master_dev_handle_t 
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(*bus_handle, &dev_cfg, tca_handle), TAG, "Failed to add TCA9554 device");
 
     return ESP_OK;
-}
-
-/**
- * @brief Write to TCA9554 register
- * @param tca_handle TCA9554 device handle
- * @param reg Register address
- * @param data Data to write
- */
-void tca9554_write_reg(i2c_master_dev_handle_t tca_handle, uint8_t reg, uint8_t data) {
-    uint8_t write_buf[2] = {reg, data};
-    i2c_master_transmit(tca_handle, write_buf, 2, -1);
 }

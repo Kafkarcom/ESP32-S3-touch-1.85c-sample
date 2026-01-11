@@ -15,6 +15,7 @@
 #include "i2c_utils.h"              // I2C utilities
 #include "display.h"                // Display functions
 #include "touch.h"                  // Touch functions
+#include "extendio.h"               // Extended IO functions
 
 static const char *TAG = "Touch 1.85 sampole";
 
@@ -26,16 +27,7 @@ void app_main(void)
     ESP_ERROR_CHECK(i2c_init(&bus_handle, &tca_handle));
 
     // --- 2. HARDWARE RESET VIA TCA9554 ---
-    ESP_LOGI(TAG, "Configuring TCA9554 EXIO2 as Output...");
-    // Configuration Register: 0 = Output, 1 = Input. 
-    // We set EXIO2 (bit 1) to 0. 
-    tca9554_write_reg(tca_handle, TCA9554_CONFIG_REG, 0xFD); // 1111 1101
-
-    ESP_LOGI(TAG, "Resetting ST77916 Display...");
-    tca9554_write_reg(tca_handle, TCA9554_OUTPUT_REG, 0xFD); // Pull EXIO2 LOW
-    vTaskDelay(pdMS_TO_TICKS(10));
-    tca9554_write_reg(tca_handle, TCA9554_OUTPUT_REG, 0xFF); // Pull EXIO2 HIGH
-    vTaskDelay(pdMS_TO_TICKS(120));
+    reset_lcd_via_tca9554(tca_handle);
 
     // --- 3. INITIALIZE QSPI BUS ---
     spi_bus_config_t buscfg = {
@@ -93,26 +85,7 @@ void app_main(void)
 
 
     // --- 2. SELECTIVE TOUCH RESET VIA TCA9554 ---
-    ESP_LOGI(TAG, "Configuring TCA9554 EXIO1 (Touch Reset) as Output...");
-
-    // 1. Set EXIO1 (bit 0) to Output. 
-    // We keep EXIO2 (bit 1) as output too if it was already set.
-    // 0xFC = 1111 1100 (Bits 0 and 1 are outputs)
-    tca9554_write_reg(tca_handle, TCA9554_CONFIG_REG, 0xFC); 
-
-    ESP_LOGI(TAG, "Performing Touch-Only Reset...");
-
-    // 2. Pull EXIO1 LOW (Reset Touch), keep EXIO2 HIGH (LCD Active)
-    // 1111 1110 = 0xFE
-    tca9554_write_reg(tca_handle, TCA9554_OUTPUT_REG, 0xFE); 
-    vTaskDelay(pdMS_TO_TICKS(50)); 
-
-    // 3. Release Reset: Pull EXIO1 HIGH
-    // 1111 1111 = 0xFF
-    tca9554_write_reg(tca_handle, TCA9554_OUTPUT_REG, 0xFF); 
-
-    // 4. CRITICAL: Wait for CST816S firmware to boot before I2C calls
-    vTaskDelay(pdMS_TO_TICKS(200));
+    reset_touch_via_tca9554(tca_handle);
     esp_lcd_touch_handle_t touch_handle;
 
     // Initialize touch sensor
