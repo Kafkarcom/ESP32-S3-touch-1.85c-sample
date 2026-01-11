@@ -2,7 +2,6 @@
 #define I2C_UTILS_H
 
 #include "driver/i2c_master.h"
-#include "esp_lcd_touch.h"
 
 // I2C Configuration
 #define I2C_SCL_IO              10
@@ -12,7 +11,6 @@
 #define TCA9554_ADDRESS         0x20
 #define TCA9554_OUTPUT_REG      0x01
 #define TCA9554_CONFIG_REG      0x03
-#define TOUCH_INT_IO            4
 
 // TCA9554 Pin Definitions
 #define TCA_PIN_TOUCH_RST  (1 << 0) // EXIO1

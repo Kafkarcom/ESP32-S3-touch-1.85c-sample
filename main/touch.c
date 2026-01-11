@@ -38,8 +38,6 @@ esp_err_t touch_init(i2c_master_bus_handle_t bus_handle, esp_lcd_touch_handle_t 
     return ESP_OK;
 }
 
-static const char *TAG = "TOUCH";
-
 static TaskHandle_t touch_task_handle = NULL;
 
 // This task sleeps until the ISR wakes it up

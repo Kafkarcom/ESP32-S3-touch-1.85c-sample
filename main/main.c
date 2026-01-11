@@ -12,12 +12,11 @@
 #include "esp_err.h"
 
 #include "esp_lcd_touch.h"          // Defines esp_lcd_touch_point_t
-#include "esp_lcd_touch_cst816s.h"  // Your specific driver
 #include "i2c_utils.h"              // I2C utilities
 #include "display.h"                // Display functions
 #include "touch.h"                  // Touch functions
 
-static const char *TAG = "S3_ST77916_LCD";
+static const char *TAG = "Touch 1.85 sampole";
 
 void app_main(void)
 {
@@ -118,11 +117,7 @@ void app_main(void)
 
     // Initialize touch sensor
     ESP_ERROR_CHECK(touch_init(bus_handle, &touch_handle));
-    
-    // Variables for the demo
-    uint16_t colors[] = {0xF800, 0x07E0, 0x001F, 0xFFFF}; // Red, Green, Blue, White
-    int color_idx = 0;
-    
+   
     // Official touch data structure
     esp_lcd_touch_point_data_t tp_point; 
     uint8_t touch_points;
@@ -136,31 +131,6 @@ void app_main(void)
     while (1) {
         ESP_LOGI(TAG, "ST77916 is still alive");
 
-// 1. Read data from hardware into internal buffer
-        // if (gpio_get_level(TOUCH_INT_IO) == 0) {
-        //     if (esp_lcd_touch_read_data(touch_handle) == ESP_OK) {
-        //         ESP_LOGI(TAG, "esp_lcd_touch_read_data = ok");
-        //         // 2. Extract the first point into our structure
-        //         // Note: We use &tp_point (esp_lcd_touch_point_t)
-        //         if (esp_lcd_touch_get_data(touch_handle, &tp_point, &touch_points, 1) == ESP_OK) {
-                    
-        //             if (touch_points > 0) {
-        //                 // 3. Access coordinates via .x and .y (Now valid)
-        //                 ESP_LOGI(TAG, "Touch Detected at [%d, %d]", tp_point.x, tp_point.y);
-                        
-        //                 // 4. Use the 'colors' variables (Fixes "unused variable" warnings)
-        //                 // lcd_fill(colors[color_idx]);
-        //                 // color_idx = (color_idx + 1) % 4;
-                        
-        //                 //vTaskDelay(pdMS_TO_TICKS(400)); // Debounce
-        //             }
-        //         }
-        //     }
-        //     else
-        //     {
-        //         ESP_LOGI(TAG, "esp_lcd_touch_read_data = not ok");
-        //     }
-        // }
         ESP_LOGI(TAG, "Filling Red");
         set_backlight_brightness(0);
         lcd_fill_screen(panel_handle, 0xF800);
