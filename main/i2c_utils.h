@@ -21,6 +21,5 @@
 // Function declarations
 esp_err_t i2c_init(i2c_master_bus_handle_t *bus_handle, i2c_master_dev_handle_t *tca_handle);
 void tca9554_write_reg(i2c_master_dev_handle_t tca_handle, uint8_t reg, uint8_t data);
-esp_err_t touch_init(i2c_master_bus_handle_t bus_handle, esp_lcd_touch_handle_t *touch_handle);
 
 #endif // I2C_UTILS_H
