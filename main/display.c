@@ -316,6 +316,19 @@ void draw_circle(esp_lcd_panel_handle_t panel_handle, uint16_t x_center, uint16_
  * @return ESP_OK on success
  */
 esp_err_t display_init(esp_lcd_panel_handle_t *panel_handle) {
+    // Initialize QSPI bus
+    spi_bus_config_t buscfg = {
+        .sclk_io_num = LCD_SCK,
+        .data0_io_num = LCD_SDA0,
+        .data1_io_num = LCD_SDA1,
+        .data2_io_num = LCD_SDA2,
+        .data3_io_num = LCD_SDA3,
+        // .max_transfer_sz = LCD_H_RES * 40 * sizeof(uint16_t),
+        .max_transfer_sz = LCD_H_RES * LCD_V_RES * 2, // Allocate enough for full buffer
+        .flags = SPICOMMON_BUSFLAG_MASTER
+    };
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+
     // Configure LCD panel IO
     esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_spi_config_t io_config = {
