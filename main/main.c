@@ -3,7 +3,6 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
-#include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_vendor.h"
@@ -14,32 +13,9 @@
 
 #include "esp_lcd_touch.h"          // Defines esp_lcd_touch_point_t
 #include "esp_lcd_touch_cst816s.h"  // Your specific driver
+#include "i2c_utils.h"              // I2C utilities
 
 static const char *TAG = "S3_ST77916_LCD";
-
-/** * User Provided I2C & TCA9554 Settings 
- */
-#define I2C_SCL_IO              10
-#define I2C_SDA_IO              11
-#define I2C_MASTER_NUM          0
-#define I2C_MASTER_FREQ_HZ      400000
-#define TCA9554_ADDRESS         0x20
-#define TCA9554_OUTPUT_REG      0x01
-#define TCA9554_CONFIG_REG      0x03
-#define TOUCH_INT_IO            4
-
-
-#define TCA9554_EXIO1 0x01
-#define TCA9554_EXIO2 0x02
-#define TCA9554_EXIO3 0x03
-#define TCA9554_EXIO4 0x04
-#define TCA9554_EXIO5 0x05
-#define TCA9554_EXIO6 0x06
-#define TCA9554_EXIO7 0x07
-#define TCA9554_EXIO8 0x08
-
-#define TCA_PIN_TOUCH_RST  (1 << 0) // EXIO1
-#define TCA_PIN_LCD_RST    (1 << 1) // EXIO2
 
 // Constants from the supplier
 #define LEDC_LS_MODE           LEDC_LOW_SPEED_MODE
@@ -250,14 +226,6 @@ static const st77916_lcd_init_cmd_t vendor_specific_init_new[] = {
   {0x29, (uint8_t []){0x00}, 1, 0},  
 };
 
-i2c_master_dev_handle_t tca_handle;
-
-// Helper to write to TCA9554 registers
-void tca9554_write_reg(uint8_t reg, uint8_t data) {
-    uint8_t write_buf[2] = {reg, data};
-    i2c_master_transmit(tca_handle, write_buf, 2, -1);
-}
-
 /**
  * @brief Initialize the LEDC peripheral for Backlight PWM
  */
@@ -403,34 +371,20 @@ static void IRAM_ATTR touch_isr_handler(void *arg) {
 void app_main(void)
 {
     // --- 1. INITIALIZE I2C ---
-    i2c_master_bus_config_t i2c_bus_config = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = I2C_MASTER_NUM,
-        .scl_io_num = I2C_SCL_IO,
-        .sda_io_num = I2C_SDA_IO,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
     i2c_master_bus_handle_t bus_handle;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_config, &bus_handle));
-
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = TCA9554_ADDRESS,
-        .scl_speed_hz = I2C_MASTER_FREQ_HZ,
-    };
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &tca_handle));
+    i2c_master_dev_handle_t tca_handle;
+    ESP_ERROR_CHECK(i2c_init(&bus_handle, &tca_handle));
 
     // --- 2. HARDWARE RESET VIA TCA9554 ---
     ESP_LOGI(TAG, "Configuring TCA9554 EXIO2 as Output...");
     // Configuration Register: 0 = Output, 1 = Input. 
     // We set EXIO2 (bit 1) to 0. 
-    tca9554_write_reg(TCA9554_CONFIG_REG, 0xFD); // 1111 1101
+    tca9554_write_reg(tca_handle, TCA9554_CONFIG_REG, 0xFD); // 1111 1101
 
     ESP_LOGI(TAG, "Resetting ST77916 Display...");
-    tca9554_write_reg(TCA9554_OUTPUT_REG, 0xFD); // Pull EXIO2 LOW
+    tca9554_write_reg(tca_handle, TCA9554_OUTPUT_REG, 0xFD); // Pull EXIO2 LOW
     vTaskDelay(pdMS_TO_TICKS(10));
-    tca9554_write_reg(TCA9554_OUTPUT_REG, 0xFF); // Pull EXIO2 HIGH
+    tca9554_write_reg(tca_handle, TCA9554_OUTPUT_REG, 0xFF); // Pull EXIO2 HIGH
     vTaskDelay(pdMS_TO_TICKS(120));
 
     // --- 3. INITIALIZE QSPI BUS ---
@@ -494,39 +448,25 @@ void app_main(void)
     // 1. Set EXIO1 (bit 0) to Output. 
     // We keep EXIO2 (bit 1) as output too if it was already set.
     // 0xFC = 1111 1100 (Bits 0 and 1 are outputs)
-    tca9554_write_reg(TCA9554_CONFIG_REG, 0xFC); 
+    tca9554_write_reg(tca_handle, TCA9554_CONFIG_REG, 0xFC); 
 
     ESP_LOGI(TAG, "Performing Touch-Only Reset...");
 
     // 2. Pull EXIO1 LOW (Reset Touch), keep EXIO2 HIGH (LCD Active)
     // 1111 1110 = 0xFE
-    tca9554_write_reg(TCA9554_OUTPUT_REG, 0xFE); 
+    tca9554_write_reg(tca_handle, TCA9554_OUTPUT_REG, 0xFE); 
     vTaskDelay(pdMS_TO_TICKS(50)); 
 
     // 3. Release Reset: Pull EXIO1 HIGH
     // 1111 1111 = 0xFF
-    tca9554_write_reg(TCA9554_OUTPUT_REG, 0xFF); 
+    tca9554_write_reg(tca_handle, TCA9554_OUTPUT_REG, 0xFF); 
 
     // 4. CRITICAL: Wait for CST816S firmware to boot before I2C calls
     vTaskDelay(pdMS_TO_TICKS(200));
     esp_lcd_touch_handle_t touch_handle;
 
-   // D. Official CST816S Touch Driver Setup
-    esp_lcd_panel_io_i2c_config_t tp_io_cfg = {
-        .dev_addr = ESP_LCD_TOUCH_IO_I2C_CST816S_ADDRESS,
-        .scl_speed_hz = 100000,                      // Try 100kHz for better stability
-        .control_phase_bytes = 1,
-        .lcd_cmd_bits = 8,
-        .flags.disable_control_phase = 1,
-    };
-    
-    esp_lcd_panel_io_handle_t tp_io_handle;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(bus_handle, &tp_io_cfg, &tp_io_handle));
-
-    esp_lcd_touch_config_t tp_cfg = {
-        .x_max = LCD_H_RES, .y_max = LCD_V_RES, .rst_gpio_num = -1, .int_gpio_num = TOUCH_INT_IO,
-    };
-    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &touch_handle));
+    // Initialize touch sensor
+    ESP_ERROR_CHECK(touch_init(bus_handle, &touch_handle));
     
     // Variables for the demo
     uint16_t colors[] = {0xF800, 0x07E0, 0x001F, 0xFFFF}; // Red, Green, Blue, White
