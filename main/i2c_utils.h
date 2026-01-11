@@ -11,5 +11,6 @@
 
 // Function declarations
 esp_err_t i2c_init(i2c_master_bus_handle_t *bus_handle, i2c_master_dev_handle_t *tca_handle);
+esp_err_t initialize_i2c(i2c_master_bus_handle_t *bus_handle, i2c_master_dev_handle_t *tca_handle);
 
 #endif // I2C_UTILS_H

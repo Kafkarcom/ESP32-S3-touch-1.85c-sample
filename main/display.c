@@ -10,6 +10,7 @@
 #include "esp_lcd_st77916.h"
 #include "driver/ledc.h"
 #include "esp_err.h"
+#include "esp_check.h"
 
 static const char *TAG = "DISPLAY";
 
@@ -307,4 +308,52 @@ void draw_circle(esp_lcd_panel_handle_t panel_handle, uint16_t x_center, uint16_
 
     esp_lcd_panel_draw_bitmap(panel_handle, draw_x, draw_y, draw_x + side, draw_y + side, buf);
     free(buf);
+}
+
+/**
+ * @brief Initialize the display panel
+ * @param panel_handle Pointer to store the panel handle
+ * @return ESP_OK on success
+ */
+esp_err_t display_init(esp_lcd_panel_handle_t *panel_handle) {
+    // Configure LCD panel IO
+    esp_lcd_panel_io_handle_t io_handle = NULL;
+    esp_lcd_panel_io_spi_config_t io_config = {
+        .dc_gpio_num = -1,
+        .cs_gpio_num = LCD_CS,
+        .pclk_hz = 40 * 1000 * 1000,
+        .lcd_cmd_bits = 32,
+        .lcd_param_bits = 8,
+        .spi_mode = 0,
+        .trans_queue_depth = 10,
+        .flags.quad_mode = true,
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &io_handle));
+
+    // Configure panel
+    st77916_vendor_config_t vendor_config = {
+        .init_cmds = vendor_specific_init_new,
+        .init_cmds_size = vendor_init_cmds_size,
+        .flags.use_qspi_interface = 1,
+    };
+
+    esp_lcd_panel_dev_config_t panel_config = {
+        .reset_gpio_num = -1, // We handled reset via I2C manually
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = 16,
+        .vendor_config = &vendor_config,
+    };
+
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st77916(io_handle, &panel_config, panel_handle));
+
+    ESP_ERROR_CHECK(esp_lcd_panel_init(*panel_handle));
+
+    esp_lcd_panel_disp_on_off(*panel_handle, true);
+
+    // Backlight
+    gpio_set_direction(LCD_BL, GPIO_MODE_OUTPUT);
+    gpio_set_level(LCD_BL, 1);
+    backlight_init();
+
+    return ESP_OK;
 }

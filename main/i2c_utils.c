@@ -35,3 +35,13 @@ esp_err_t i2c_init(i2c_master_bus_handle_t *bus_handle, i2c_master_dev_handle_t 
 
     return ESP_OK;
 }
+
+/**
+ * @brief Initialize I2C system
+ * @param bus_handle Pointer to store the I2C bus handle
+ * @param tca_handle Pointer to store the TCA9554 device handle
+ * @return ESP_OK on success
+ */
+esp_err_t initialize_i2c(i2c_master_bus_handle_t *bus_handle, i2c_master_dev_handle_t *tca_handle) {
+    return i2c_init(bus_handle, tca_handle);
+}

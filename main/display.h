@@ -33,5 +33,6 @@ void backlight_init(void);
 void set_backlight_brightness(uint8_t percentage);
 void lcd_fill_screen(esp_lcd_panel_handle_t panel_handle, uint16_t color);
 void draw_circle(esp_lcd_panel_handle_t panel_handle, uint16_t x_center, uint16_t y_center, uint16_t r, uint16_t color);
+esp_err_t display_init(esp_lcd_panel_handle_t *panel_handle);
 
 #endif // DISPLAY_H
